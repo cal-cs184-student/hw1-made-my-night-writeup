@@ -51,15 +51,28 @@
 		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
 
 		<h2>Task 1: Drawing Single-Color Triangles</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p style="text-indent: 2em;">In this task, I implemented triangle rasterization by testing sample points within the triangle's bounding box.
+		First, I computed the bounding box from the minimum and maximum x and y coordinates of the three vertices,
+		flooring the minimums and taking the ceiling of the maximums so that every pixel the triangle could touch is covered.
+		<br>
+		&emsp;&emsp;Next, I normalized the triangle to counter-clockwise winding. I computed the triangle's signed area using a
+		2D cross product, and if it was negative, I swapped the second and third vertices. Degenerate triangles
+		(zero area) are skipped. Normalizing the winding means a point is inside the triangle exactly when it lies on
+		the left side of all three edges, so a single inside test works for triangles given in either order.
+		<br>
+		&emsp;&emsp;Finally, I looped over every pixel in the bounding box and sampled at its center, (x + 0.5, y + 0.5). For each
+		sample, I evaluated the three line tests: the cross product of each edge vector with the vector from that edge's
+		starting vertex to the sample point. If all three results were non-negative, the sample is inside the triangle
+		(or on its boundary), and I filled that pixel with the triangle's color.
+		<br> </p>
 
 		<p>Here is an example 2x2 gridlike structure using an HTML table. Each <b>tr</b> is a row and each <b>td</b> is a column in that row. You might find this useful for framing and showing your result images in an organized fashion.</p>
 		<div style="display: flex; flex-direction: column; align-items: center;">
 			<table style="width: 100%; text-align: center; border-collapse: collapse;">
 			  <tr>
 				<td style="text-align: center;">
-				  <img src="assets/lion.jpg" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/screenshot_9-23_9-36-32.png" width="400px"/>
+				  <figcaption>Basic Test 4 (No OpenGL Edge Rules)</figcaption>
 				</td>
 				<td style="text-align: center;">
 				  <img src="assets/lion.jpg" width="400px"/>
