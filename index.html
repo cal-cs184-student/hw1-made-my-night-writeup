@@ -32,15 +32,14 @@
 
 		<br>
 
-		Link to webpage: <a href="https://cal-cs184-student.github.io/hw1-made-my-night-writeup/">atsushi-cs184.github.io</a>
+		Link to webpage: <a href="">atsushi-cs184.github.io</a>
 		
 		<br>
 
 		Link to GitHub repository:  <a href="https://github.com/cal-cs184-student/hw1-made-my-night">Hw 1 Repo</a>
 
 		<figure>
-			<img src="assets/lion.jpg" alt="Lion" style="width:50%"/>
-			<figcaption>You can add images with captions!</figcaption>
+			<img src="assets/task0.jpg" alt="Lion" style="width:50%"/>
 		</figure>
 
 		<!--
@@ -48,7 +47,25 @@
 		-->
 
 		<h2>Overview</h2>
-		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
+		<p>
+  In this homework I built a rasterizer that turns SVG files into images, starting from
+  single-color triangles and working up to textured triangles with antialiasing.
+  I first rasterized triangles by testing sample points against the triangle's three edges.
+  I then added supersampling to smooth jagged edges, and support for SVG transforms, which
+  I used to pose my own cubeman. Next I used barycentric coordinates to blend colors across
+  a triangle. Finally I did texture mapping, with nearest and bilinear pixel sampling and
+  mipmap level sampling.
+</p>
+
+<p>
+  The biggest thing I took away is that most of rendering comes down to sampling.
+  Almost every artifact I ran into, whether jagged triangle edges, blocky magnified
+  textures, or shimmering in shrunk textures, came from taking too few samples of
+  something continuous. Each fix was a different way to sample better: take more samples
+  per pixel, blend between neighboring texels, or read from a pre-averaged mipmap level. It
+  was also interesting to see that these fixes trade speed, memory, and sharpness against
+  each other, so none of them is the best choice in every case.
+</p>
 
 		<h2>Task 1: Drawing Single-Color Triangles</h2>
 		<p style="text-indent: 2em;">In this task, I implemented triangle rasterization by testing sample points within the triangle's bounding box.
@@ -68,10 +85,10 @@
 
 		<p>Here is an example 2x2 gridlike structure using an HTML table. Each <b>tr</b> is a row and each <b>td</b> is a column in that row. You might find this useful for framing and showing your result images in an organized fashion.</p>
 		<div style="display: flex; flex-direction: column; align-items: center;">
-			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			<table style="text-align: center; border-collapse: collapse;">
 			  <tr>
 				<td style="text-align: center;">
-				  <img src="assets/screenshot_9-23_9-36-32.png" width="400px"/>
+				  <img src="assets/task1.png" width="400px"/>
 				  <figcaption>Basic Test 4 (No OpenGL Edge Rules)</figcaption>
 				</td>
 				<td style="text-align: center;">
@@ -79,47 +96,343 @@
 				  <figcaption>Basic Test 4 (OpenGL Edge Rules)</figcaption>
 				</td>
 			  </tr>
-			  <tr>
-				<td style="text-align: center;">
-				  <img src="assets/lion.jpg" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
-				</td>
-				<td style="text-align: center;">
-				  <img src="assets/lion.jpg" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
-				</td>
-			  </tr>
 			</table>
 		</div>
 		
 		<h2>Task 2: Antialiasing by Supersampling</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+		Supersampling works by evaluating coverage and color at several points inside each
+		pixel instead of just one. With a sample rate of N, I treat each pixel as an
+		s &times; s grid of subsamples, where s = &radic;N, and test each subsample's position
+		(the center of its sub-cell) against the triangle independently.
+		</p>
+
+		<p>
+		The main data structure is the sample buffer, which holds N colors per pixel instead of
+		one. The subsample (i, j) of pixel (x, y) is stored at index
+		<code>(y * width + x) * sample_rate + (j * s + i)</code>. The frame buffer stays at one
+		color per pixel and is only filled when the sample buffer is resolved.
+		</p>
+
+<p>
+  Supersampling is useful for antialiasing because a single sample per pixel makes a
+  binary decision: the pixel is either fully inside a triangle or fully outside it. Along
+  an edge, this produces jagged staircase artifacts (jaggies), since the true edge only
+  covers part of the pixel. Multiple samples per pixel estimate the fraction of the pixel
+  the triangle actually covers, so edge pixels get an intermediate color instead of an
+  all-or-nothing one.
+</p>
+
+<p>Modifications to the pipeline:</p>
+<ul>
+  <li>
+    <strong>Resizing:</strong> the sample buffer is allocated (and reallocated whenever the
+    sample rate changes) to <code>width * height * sample_rate</code> entries.
+  </li>
+  <li>
+    <strong>Rasterization:</strong> each triangle function loops over the pixels in the
+    bounding box, then over the subsamples in each pixel. The inside test and any
+    interpolation (barycentric color, or UV plus texture lookup) are computed at the
+    subsample's position rather than the pixel's, and the result is written to that
+    subsample's slot in the sample buffer.
+  </li>
+  <li>
+    <strong>Resolving:</strong> <code>resolve_to_framebuffer</code> averages the
+    <code>sample_rate</code> subsamples of each pixel into a single color and writes it to
+    the frame buffer. Averaging happens only here, because different triangles can cover
+    different subsamples of the same pixel and every triangle has to be drawn first.
+  </li>
+  <li>
+    <strong>Clearing:</strong> the sample buffer is reset to the background color each
+    frame.
+  </li>
+</ul>
+
+<p>
+  To antialias a triangle edge, consider a pixel that the edge cuts through so that 3 of
+  its 4 subsamples are inside the triangle. Those three hold the triangle's color and the
+  fourth holds the background, so the resolved pixel is 75% triangle color and 25%
+  background. This produces a smooth gradient along the edge instead of a hard staircase,
+  which acts as a low-pass filter on the high-frequency edge signal. The cost is memory
+  and runtime that scale by a factor of the sample rate.
+</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/task2-sr1.png" style="width: 300px; height: 300px; object-fit: none; object-position: 30% 76%;"/>
+				  <figcaption>Sample Rate 1</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/task2-sr4.png" style="width: 300px; height: 300px; object-fit: none; object-position: 30% 76%;"/>
+				  <figcaption>Sample Rate 4</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/task2-sr16.png" style="width: 300px; height: 300px; object-fit: none; object-position: 30% 76%;"/>
+				  <figcaption>Sample Rate 16</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
 
 		<h2>Task 3: Transforms</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p style="text-indent: 2em;">For my version of cubeman (saved as <a href="my_robot.svg">my_robot.svg</a>), I was trying to make the robot dab.
+		I kept the original torso, head, and legs, and only changed the arms. In a dab, one arm is thrown out straight at an
+		angle while the other is bent up across the face, so I rebuilt each arm out of two segments that could be positioned
+		and angled independently instead of the straight horizontal arms from the original robot.
+		<br>
+		&emsp;&emsp;Each arm segment starts as the same unit square made of two triangles. I first rotated the square (60&deg; or 45&deg;),
+		then squashed it with a non-uniform scale of (1, 0.1) so it became a long, thin, slanted bar, and finally translated it
+		into place next to the shoulders. Because the scale is applied after the rotation, the square gets sheared into a thin
+		parallelogram rather than just a rotated rectangle, which gave the arms their pointed, slanted look. Both segments of
+		an arm sit inside a shared group translated to that shoulder, and the second segment gets an extra translation on top of
+		that, so moving the shoulder group moves the whole arm together, like a forearm attached to an upper arm.</p>
+
+		<figure>
+			<img src="assets/task3.png" width="400px"/>
+			<figcaption> Dabbing Robot</figcaption>
+		</figure>
 
 		<h2>Task 4: Barycentric coordinates</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+  Barycentric coordinates describe a point inside a triangle as a weighted average of
+  the triangle's three vertices. For a triangle with vertices A, B, and C, any point P
+  can be written as P = &alpha;A + &beta;B + &gamma;C, where &alpha; + &beta; + &gamma; = 1.
+  Each weight says how much a vertex "pulls" on the point: at vertex A the weights are
+  (1, 0, 0), halfway along edge AB they are (0.5, 0.5, 0), and at the centroid they are
+  (1/3, 1/3, 1/3). The closer P is to a vertex, the larger that vertex's weight.
+</p>
+
+<p>
+  Geometrically, each weight is a ratio of areas. &alpha; is the area of the sub-triangle
+  PBC (the one opposite A) divided by the area of the whole triangle ABC, and &beta; and
+  &gamma; work the same way with the other two sub-triangles. Since the three
+  sub-triangles always add up to the whole triangle, the weights always sum to 1. A
+  negative weight means P is on the wrong side of an edge, so the same weights also give
+  a test for whether a point is inside the triangle: all three must be &ge; 0.
+</p>
+
+<svg viewBox="0 0 300 250" width="300" role="img"
+     aria-label="Triangle ABC with interior point P connected to each vertex">
+  <polygon points="150,20 30,220 270,220" fill="none" stroke="#333" stroke-width="2"/>
+  <line x1="150" y1="150" x2="150" y2="20" stroke="#999" stroke-dasharray="4"/>
+  <line x1="150" y1="150" x2="30" y2="220" stroke="#999" stroke-dasharray="4"/>
+  <line x1="150" y1="150" x2="270" y2="220" stroke="#999" stroke-dasharray="4"/>
+  <circle cx="150" cy="20" r="6" fill="red"/>
+  <circle cx="30" cy="220" r="6" fill="green"/>
+  <circle cx="270" cy="220" r="6" fill="blue"/>
+  <circle cx="150" cy="150" r="5" fill="#333"/>
+  <text x="158" y="22" font-size="14">A</text>
+  <text x="12" y="238" font-size="14">B</text>
+  <text x="274" y="238" font-size="14">C</text>
+  <text x="158" y="146" font-size="14">P</text>
+</svg>
+
+<p>
+  This is useful for graphics because the weights can interpolate any per-vertex
+  attribute. If A, B, and C have colors c0, c1, and c2, then the color at P is
+  &alpha;c0 + &beta;c1 + &gamma;c2. In my rasterizer I compute &alpha;, &beta;, and
+  &gamma; for every subsample position inside the triangle and use them to blend the
+  vertex colors. The same weights interpolate texture coordinates (u, v) for textured
+  triangles.
+</p>
+
+<p>
+  The image below is my rasterizer's output for a single triangle with a red, a green,
+  and a blue vertex. Each vertex is pure at its own corner, and the colors blend smoothly
+  toward the other two vertices, because the weights change linearly across the triangle.
+  At the center, all three weights are equal, so the color is an even mix of red, green,
+  and blue.
+</p>
+
+		<figure>
+			<img src="assets/task4.png" width="400px"/>
+			<figcaption>Color Wheel</figcaption>
+		</figure>
 
 		<h2>Task 5: "Pixel sampling" for texture mapping</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+<p>
+  Pixel sampling is how we decide what color a screen sample should get from a texture.
+  Every vertex of a textured triangle has a (u, v) coordinate that points to a spot in the
+  texture image, where (0, 0) is one corner of the texture and (1, 1) is the opposite
+  corner. When a sample on the screen lands inside the triangle, we work out which (u, v)
+  it corresponds to and then look up the texture there. The catch is that (u, v) almost
+  never lands exactly on the center of a texel, so we need a rule for turning a
+  continuous texture position into a color. That rule is the pixel sampling method.
+</p>
+
+<p>
+  To implement texture mapping, I reused the loop from my earlier triangle functions: for
+  every subsample inside the triangle's bounding box, I compute its barycentric
+  coordinates &alpha;, &beta;, and &gamma;. If all three are non-negative, the subsample is
+  inside the triangle, and I use the same weights to interpolate the vertices' texture
+  coordinates: u = &alpha;u0 + &beta;u1 + &gamma;u2 and v = &alpha;v0 + &beta;v1 +
+  &gamma;v2. I store (u, v) and the selected sampling modes in a
+  <code>SampleParams</code> struct, pass it to <code>Texture::sample</code>, and write the
+  returned color into that subsample's slot in the sample buffer.
+</p>
+
+<p>The two pixel sampling methods differ in how they turn (u, v) into a color:</p>
+<ul>
+  <li>
+    <strong>Nearest:</strong> I scale (u, v) by the texture's width and height to get a
+    position in texel units, floor it to get the texel that position falls in, clamp it
+    to the texture's bounds, and return that single texel's color. This is fast, one
+    lookup per sample, but when the texture is magnified many screen pixels map to the
+    same texel, so the result looks blocky. When the texture is shrunk, neighboring
+    pixels can jump between very different texels, which causes jaggies and shimmering.
+  </li>
+  <li>
+    <strong>Bilinear:</strong> I scale (u, v) to texel units and subtract 0.5 so the
+    position is measured relative to texel centers. I then take the four texels
+    surrounding that point (clamped to the texture's bounds) and blend them by how close
+    the point is to each one. First I interpolate horizontally across the top pair and
+    the bottom pair using the fractional x offset, then interpolate between those two
+    results vertically using the fractional y offset. This costs four lookups instead of
+    one, but the color changes smoothly between texels, so magnified textures look
+    smooth instead of blocky and thin details don't break up as badly.
+  </li>
+</ul>
+
+				<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/task5-1.png" width="400px"/>
+				  <figcaption>Nearest pixel sampling, 1 sample per pixel: the zoomed-in coastline and grid lines are made of hard, blocky texels with jagged stair-step edges.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/task5-2.png" width="400px"/>
+				  <figcaption>Nearest pixel sampling, 16 samples per pixel: supersampling averages several texel lookups per pixel, so the thin grid lines and coastline edges are softer, though each texel is still a flat block.</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/task5-3.png" width="400px"/>
+				  <figcaption>Bilinear pixel sampling, 1 sample per pixel: each color is blended from the four nearest texels, so the coastline and grid lines fade smoothly into the ocean instead of stepping.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/task5-4.png" width="400px"/>
+				  <figcaption>Bilinear pixel sampling, 16 samples per pixel: the smoothest result. Bilinear blending plus supersampling removes most of the jaggedness, and the extra samples add only a small improvement over bilinear alone.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
 
 		<h2>Task 6: "Level Sampling" with mipmaps for texture mapping</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+<p>
+  Level sampling deals with textures that are shrunk on screen. When a triangle is far
+  away or seen at a steep angle, a single screen pixel can cover many texels, but pixel
+  sampling only reads one texel (or four for bilinear) from the full-resolution texture.
+  It effectively skips most of the texels in that pixel's footprint, which causes
+  aliasing such as moir&eacute; patterns and shimmering. A mipmap fixes this by storing
+  the texture at a series of levels, where each level is half the width and height of
+  the one before and every texel is an average of the texels it replaces. Level sampling
+  means choosing the mipmap level whose texel size roughly matches the screen pixel's
+  footprint, so that one lookup already stands for the average over the whole area the
+  pixel covers.
+</p>
 
-		<h2>(Optional) Task 7: Extra Credit - Draw Something Creative!</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+<p>
+  To pick a level, I need to know how fast (u, v) changes from one screen pixel to the
+  next. In my textured triangle function, I compute the barycentric coordinates again at
+  the points one pixel to the right, (x + 1, y), and one pixel down, (x, y + 1), and use
+  them to interpolate (u, v) at both points. Subtracting the (u, v) at the current sample
+  gives the differentials du/dx, dv/dx, du/dy, and dv/dy, which I store in
+  <code>SampleParams</code>. In <code>Texture::get_level</code>, I multiply these by the
+  texture's width and height to put them in texel units, take L as the longer of the two
+  vectors, and compute the level as log<sub>2</sub>(L). If L is at most 1 the texture
+  isn't being shrunk, so I return level 0. I also clamp the result to the last mipmap
+  level.
+</p>
 
-		<h2>Additional Notes (please remove)</h2>
-		<ul>
-			<li>You can also add code if you'd like as so: <code>code code code</code></li>
-			<li>If you'd like to add math equations, 
-				<ul>
-					<li>You can write inline equations like so: \( a^2 + b^2 = c^2 \)</li>
-					<li>You can write display equations like so: \[ a^2 + b^2 = c^2 \]</li>
-				</ul>
-			</li>
-		</ul>
+<p><code>Texture::sample</code> then uses the level sampling mode:</p>
+<ul>
+  <li><strong>Zero:</strong> always sample level 0, the full-resolution texture.</li>
+  <li>
+    <strong>Nearest:</strong> round the computed level to the nearest integer and sample
+    that level.
+  </li>
+  <li>
+    <strong>Linear:</strong> sample the two levels on either side of the computed level
+    and blend them by the fractional part. For example, level 2.3 gives 70% of level 2
+    and 30% of level 3. Combined with bilinear pixel sampling, this is trilinear
+    filtering.
+  </li>
+</ul>
+<p>Each lookup inside a level still uses whichever pixel sampling method (nearest or bilinear) is selected.</p>
+
+<p>Tradeoffs between the three techniques:</p>
+<ul>
+  <li>
+    <strong>Supersampling (samples per pixel)</strong> is the most powerful and the most
+    expensive. The sample buffer holds <code>width * height * sample_rate</code> colors,
+    so memory grows linearly with the sample rate. The inside test, barycentric
+    coordinates, and texture lookup are also repeated for every subsample, so rendering
+    is roughly <code>sample_rate</code> times slower. In return, it is the only one of
+    the three that smooths jagged triangle edges, and it also reduces texture aliasing
+    because each pixel averages several texture lookups.
+  </li>
+  <li>
+    <strong>Pixel sampling</strong> uses no extra memory. Nearest is one texel read per
+    sample. Bilinear is four reads plus a few multiplies, which is slightly slower but
+    much smoother when a texture is magnified. It only looks at the four texels around
+    one point, so it can't fix aliasing when many texels fall inside one pixel, and it
+    does nothing for triangle edges.
+  </li>
+  <li>
+    <strong>Level sampling</strong> costs extra memory for the mipmap. Each level is a
+    quarter the size of the one before, so all the levels together add about one third
+    to the texture's memory. It is also a bit slower per sample, because it computes the
+    (u, v) differentials and a log<sub>2</sub>. Linear level sampling reads two levels,
+    doubling the lookups (eight texel reads with bilinear). It is very effective against
+    aliasing in shrunk or distant textures, since each lookup is already an average over
+    the pixel's footprint. However, it picks a level from the longer differential, so it
+    can over-blur surfaces viewed at an angle, and like pixel sampling it doesn't
+    antialias triangle edges.
+  </li>
+</ul>
+
+				<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td colspan="2" style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-25-55.png" width="400px"/>
+				  <figcaption>My custom texture (Half Dome) mapped onto the warped grid, shown without the zoom window.</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-26-5.png" width="400px"/>
+				  <figcaption>Level 0, nearest pixel sampling: sampling the full-resolution texture with one texel per sample gives a sharp but jagged stair-step edge between the sky and the rock.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-26-7.png" width="400px"/>
+				  <figcaption>Level 0, bilinear pixel sampling: still the full-resolution texture, but blending four texels softens the stair steps along the edge.</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-26-46.png" width="400px"/>
+				  <figcaption>Nearest level, nearest pixel sampling: the sample comes from the mipmap level that best matches the pixel footprint, so the lower-resolution texels show up as larger, flatter blocks along the edge.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-27-18.png" width="400px"/>
+				  <figcaption>Nearest level, bilinear pixel sampling: the same mipmap level, with bilinear blending smoothing the transition between the larger blocks.</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-27-8.png" width="400px"/>
+				  <figcaption>Linear level, nearest pixel sampling: blending the two closest mipmap levels turns the edge into a soft gradient with no visible stair steps, at the cost of some sharpness.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/screenshot_9-27_14-27-9.png" width="400px"/>
+				  <figcaption>Linear level, bilinear pixel sampling (trilinear filtering): the smoothest and blurriest result, since every sample blends four texels on each of two mipmap levels.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
 		</div>
 	</body>
 </html>
